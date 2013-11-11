@@ -3,7 +3,7 @@
 Plugin Name: wp-mpdf
 Plugin URI: http://fkrauthan.de/eng/projects/php/7-wp-mpdf
 Description: Print a wordpress page as PDF with optional Geshi Parsing.
-Version: 2.11.0
+Version: 3.1.1
 Author: Florian 'fkrauthan' Krauthan
 Author URI: http://fkrauthan.de
 
@@ -73,32 +73,14 @@ function mpdf_install() {
 		$wpdb->query('DROP TABLE '.$table_name_old);
 	}
 	
-
-	if(is_dir(dirname(__FILE__).'/themes/')) {
-		//Move the Theme dir
-		if(!is_dir(dirname(__FILE__).'/../../wp-mpdf-themes')) {
-			if(!@mkdir(dirname(__FILE__).'/../../wp-mpdf-themes')) {
-				echo '<p>Can\'t create mpdf themes dir. Please create the dir "wp-content/wp-mpdf-themes" and give your webserver write permission to it.</p>';
-			}
-		}
-
-		$dh = opendir(dirname(__FILE__).'/themes/');
-		while(($file = readdir($dh)) !== false) {
-    			if($file != "." && $file != "..") {
-				if(!@rename(dirname(__FILE__).'/themes/'.$file, dirname(__FILE__).'/../../wp-mpdf-themes/'.$file)) {
-					echo '<p>Can\'t move the file "'.'wp-content/plugins/wp-mpdf/themes/'.$file.'" to "'.'wp-content/wp-mpdf-themes/'.$file.'". Please do this by your self.</p>';
-				}
-			}
-		}
-		closedir($dh);
-
-		if(!@rmdir(dirname(__FILE__).'/themes/')) {
-			echo '<p>Can\'t delete the folder "wp-content/plugins/wp-mpdf/themes/". Please to this by your self.</p>';
+	if(!is_dir(dirname(__FILE__).'/../../wp-mpdf-themes')) {
+		if(!@mkdir(dirname(__FILE__).'/../../wp-mpdf-themes')) {
+			echo '<p>Can\'t create mpdf themes dir. Please create the dir "wp-content/wp-mpdf-themes" and give your webserver write permission to it.</p>';
 		}
 	}
 }
 
-function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, $pdfName = '') {
+function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, $pdfName = '', $templatePath = '') {
 	global $post;
 	$pdf_ofilename = $post->post_name . '.pdf';
 	if(!empty($pdfName)) {
@@ -136,8 +118,14 @@ function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, 
 		echo $wp_content;
 	}
 	else {
+		$cacheDirectory = mpdf_getcachedir();
+		if(!is_dir($cacheDirectory . '/tmp')) {
+			@mkdir($cacheDirectory . ' /tmp');
+		}
+
 		define('_MPDF_PATH',dirname(__FILE__).'/mpdf/');
-        define('_MPDF_TEMP_PATH', _MPDF_PATH.'graph_cache/');
+        define('_MPDF_TEMP_PATH', $cacheDirectory . ' /tmp/');
+		define('_MPDF_TTFONTDATAPATH', _MPDF_TEMP_PATH);
 		require_once(_MPDF_PATH.'mpdf.php');
 		
 		global $pdf_margin_left;
@@ -173,7 +161,7 @@ function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, 
 		$mpdf->title2annots = false;
 		//$mpdf->annotMargin = 12;
 		$mpdf->use_embeddedfonts_1252 = true;	// false is default
-		$mpdf->SetBasePath(dirname(__FILE__).'/../../wp-mpdf-themes/');
+		$mpdf->SetBasePath($templatePath);
 
 		//Set PDF Template if it's set
 		global $pdf_template_pdfpage;
@@ -181,11 +169,11 @@ function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, 
 		global $pdf_template_pdfdoc;
 		if(isset($pdf_template_pdfdoc)&&$pdf_template_pdfdoc!='') {
             $mpdf->SetImportUse();
-			$mpdf->SetDocTemplate(dirname(__FILE__).'/../../wp-mpdf-themes/'.$pdf_template_pdfdoc, true);
+			$mpdf->SetDocTemplate($templatePath.$pdf_template_pdfdoc, true);
 		}
 		else if(isset($pdf_template_pdfpage)&&$pdf_template_pdfpage!=''&&isset($pdf_template_pdfpage_page)&&is_numeric($pdf_template_pdfpage_page)) {
             $mpdf->SetImportUse();			
-            $pagecount = $mpdf->SetSourceFile(dirname(__FILE__).'/../../wp-mpdf-themes/'.$pdf_template_pdfpage);
+            $pagecount = $mpdf->SetSourceFile($templatePath.$pdf_template_pdfpage);
 			if($pdf_template_pdfpage_page<1) $pdf_template_pdfpage_page = 1;
 			else if($pdf_template_pdfpage_page>$pagecount) $pdf_template_pdfpage_page = $pagecount;
 			$tplId = $mpdf->ImportPage($pdf_template_pdfpage_page);
@@ -217,9 +205,9 @@ function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, 
 		}
 		
 		
-		if(get_option('mpdf_theme')!=''&&file_exists(dirname(__FILE__).'/../../wp-mpdf-themes/'.get_option('mpdf_theme').'.css')) {
+		if(get_option('mpdf_theme')!=''&&file_exists($templatePath.get_option('mpdf_theme').'.css')) {
 			//Read the StyleCSS
-			$tmpCSS = file_get_contents(dirname(__FILE__).'/../../wp-mpdf-themes/'.get_option('mpdf_theme').'.css');
+			$tmpCSS = file_get_contents($templatePath.get_option('mpdf_theme').'.css');
 			$mpdf->WriteHTML($tmpCSS, 1);
 		}
 		
@@ -228,6 +216,9 @@ function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, 
 		$wp_content = mpdf_myfilters($wp_content);
 
 		if(get_option('mpdf_debug') == true) {
+			if(!is_dir(dirname(__FILE__).'/debug/')) {
+				mkdir(dirname(__FILE__).'/debug/');
+			}
 			file_put_contents(dirname(__FILE__).'/debug/'.get_option('mpdf_theme').'_'.$pdf_ofilename.'.html', $wp_content);
 		}
 
@@ -240,8 +231,8 @@ function mpdf_output($wp_content = '', $do_pdf = false , $outputToBrowser=true, 
 		do_action('mpdf_output', $mpdf, $pdf_filename);
 		
 		if(get_option('mpdf_caching')==true) {
-			file_put_contents(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_ofilename.'.cache', $post->post_modified_gmt);
-			$mpdf->Output(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_ofilename, 'F');
+			file_put_contents(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_ofilename.'.cache', $post->post_modified_gmt);
+			$mpdf->Output(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_ofilename, 'F');
 			if($outputToBrowser==true) {			
 				$mpdf->Output($pdf_filename, 'I');
 			}
@@ -296,7 +287,12 @@ function mpdf_mysql2unix($timestamp) {
 	return mktime($hour,$minute,$second,$month,$day,$year);
 }
 
-function mpdf_pdfbutton($opennewtab=false, $buttontext = '', $logintext = 'Login!', $print_button = true) {
+function mpdf_pdfbutton($opennewtab=false, $buttontext = '', $logintext = 'Login!', $print_button = true, $nofollow = false) {
+	$nofollowHtml = '';
+	if($nofollow) {
+		$nofollowHtml = 'rel="nofollow" ';
+	}
+
 	//Check if button should displayed
 	if(get_option('mpdf_allow_all')!=1 || get_option('mpdf_need_login')!=0) {
 		global $wpdb;
@@ -310,13 +306,13 @@ function mpdf_pdfbutton($opennewtab=false, $buttontext = '', $logintext = 'Login
 		}
 		else if((get_option('mpdf_need_login')==2&&$dsatz->login==false || get_option('mpdf_need_login')==3&&$dsatz->login==true)&&is_user_logged_in()!=true) {
 			if(empty($buttontext)) {
-				$buttontext = '<img src="' . get_bloginfo('wpurl') . '/wp-content/plugins/wp-mpdf/pdf_lock.png" alt="'.$logintext.'" title="You must login first" border="0" />';
+				$buttontext = '<img src="' . get_bloginfo('wpurl') . '/wp-content/plugins/wp-mpdf/pdf_lock.png" alt="'.__($logintext, 'wp-mpdf').'" title="'.__('You must login first', 'wp-mpdf').'" border="0" />';
 			}
 			else {
-				$buttontext = $logintext;
+				$buttontext = __($logintext, 'wp-mpdf');
 			}
 			
-			$pdf_button = '<a class="pdfbutton loginfirst" href="'.wp_login_url(get_permalink()).'" title="You must login first">'.$buttontext.'</a>';
+			$pdf_button = '<a ' . $nofollowHtml . 'class="pdfbutton loginfirst" href="'.wp_login_url(get_permalink()).'" title="'.__('You must login first', 'wp-mpdf').'">'.$buttontext.'</a>';
 			
 			if($print_button === true) {
 				echo $pdf_button;
@@ -330,12 +326,12 @@ function mpdf_pdfbutton($opennewtab=false, $buttontext = '', $logintext = 'Login
 	
 	//Print the button
 	if(empty($buttontext))
-		$buttontext = '<img src="' . get_bloginfo('wpurl') . '/wp-content/plugins/wp-mpdf/pdf.png" alt="This page as PDF" border="0" />';
+		$buttontext = '<img src="' . get_bloginfo('wpurl') . '/wp-content/plugins/wp-mpdf/pdf.png" alt="'.__('This page as PDF', 'wp-mpdf').'" border="0" />';
 	
 	$x = !strpos(apply_filters('the_permalink', get_permalink()), '?') ? '?' : '&amp;';
-	$pdf_button = '<a ';
+	$pdf_button = '<a ' . $nofollowHtml;
 	if($opennewtab==true) $pdf_button .= 'target="_blank" ';
-	$pdf_button .= 'class="pdfbutton" href="' . apply_filters('the_permalink', get_permalink()) . $x . 'output=pdf">' . $buttontext . '</a>';
+	$pdf_button .= 'class="pdfbutton" href="' . apply_filters('the_permalink', get_permalink()) . $x . 'output=pdf">' . __($buttontext, 'wp-mpdf') . '</a>';
 	
 	if($print_button === true) {
 		echo $pdf_button;
@@ -344,16 +340,28 @@ function mpdf_pdfbutton($opennewtab=false, $buttontext = '', $logintext = 'Login
 	}
 }
 
+function mpdf_getcachedir() {
+	$directory = dirname(__FILE__).'/cache/';
+	if(!is_dir($directory) || !is_writable($directory)) {
+		$directory = dirname(__FILE__).'/../../wp-mpdf-themes/cache/';
+		if(!is_dir($directory) || !is_writable($directory)) {
+			die('wp-mpdf can\'t access cache directory. Please verify your setup!');
+		}
+	}
+
+	return $directory;
+}
+
 function mpdf_readcachedfile($name, $pdfname) {
-	$fp = fopen(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$name, 'rb');
+	$fp = fopen(mpdf_getcachedir().get_option('mpdf_theme').'_'.$name, 'rb');
 	if(!$fp) die('Couldn\'t Read cache file');
 	fclose($fp);
 	
 	Header('Content-Type: application/pdf');
-	Header('Content-Length: '.filesize(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$name));
+	Header('Content-Length: '.filesize(mpdf_getcachedir().get_option('mpdf_theme').'_'.$name));
 	Header('Content-disposition: inline; filename='.$pdfname);
 	
-	echo file_get_contents(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$name, FILE_BINARY | FILE_USE_INCLUDE_PATH);
+	echo file_get_contents(mpdf_getcachedir().get_option('mpdf_theme').'_'.$name, FILE_BINARY | FILE_USE_INCLUDE_PATH);
 }
 
 function mpdf_exec($outputToBrowser='') {
@@ -365,8 +373,8 @@ function mpdf_exec($outputToBrowser='') {
 	 */
 	$outputToBrowser = apply_filters('mpdf_exec_outputToBrowser', $outputToBrowser);
 	
-	if($_GET['output'] == 'pdf') {
-		//Check if this Page is allwoed to print as PDF
+	if(isset($_GET['output']) && $_GET['output'] == 'pdf') {
+		//Check if this Page is allowed to print as PDF
 		global $wpdb;
 		global $post;
 		$table_name = $wpdb->prefix . WP_MPDF_POSTS_DB;
@@ -399,8 +407,8 @@ function mpdf_exec($outputToBrowser='') {
 		//Check for Caching option
 		if(get_option('mpdf_caching')==true) {
 			$pdf_filename = $post->post_name . '.pdf';
-			if(file_exists(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_filename.'.cache')&&file_exists(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_filename)) {
-				$createDate = file_get_contents(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_filename.'.cache');
+			if(file_exists(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_filename.'.cache')&&file_exists(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_filename)) {
+				$createDate = file_get_contents(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_filename.'.cache');
 				if($createDate==$post->post_modified_gmt) {
 					//We could Read the Cached file
 					if($outputToBrowser==true) {
@@ -417,10 +425,18 @@ function mpdf_exec($outputToBrowser='') {
 					}
 				}
 			}
-		} 
-		
-		require(dirname(__FILE__).'/../../wp-mpdf-themes/'.get_option('mpdf_theme').'.php');	
-		mpdf_output($pdf_output, true, $outputToBrowser, $dsatz->pdfname);
+		}
+
+		$templatePath = dirname(__FILE__).'/../../wp-mpdf-themes/';
+		$templateFile = $templatePath . get_option('mpdf_theme').'.php';
+		if(!file_exists($templateFile)) {
+			$templatePath = dirname(__FILE__).'/themes/';
+			$templateFile = $templatePath . get_option('mpdf_theme').'.php';
+		}
+
+		$pdf_output = '';
+		require($templateFile);
+		mpdf_output($pdf_output, true, $outputToBrowser, $dsatz->pdfname, $templatePath);
 		
 		if($outputToBrowser==true) {
 			exit;
@@ -434,7 +450,7 @@ function mpdf_admin() {
 }
 
 function mpdf_create_admin_menu() {
-	add_submenu_page('options-general.php', 'wp-mpdf - config', 'wp-mpdf', 8, dirname(__FILE__), 'mpdf_admin');
+	add_submenu_page('options-general.php', 'wp-mpdf - config', 'wp-mpdf', 'edit_pages', dirname(__FILE__), 'mpdf_admin');
 	
 	if(function_exists('add_meta_box')) {
 		add_meta_box('mpdf_admin', 'wp-mpdf', 'mpdf_admin_printeditbox', 'post', 'normal', 'high');
@@ -464,15 +480,15 @@ function mpdf_admin_printeditbox() {
 	}
 	echo 'type="checkbox" name="wp_mpdf_candownload" /></td></tr>';
 	
-	echo '<tr><td>Put on whitelist/blacklist for need Login</td><td><input ';
+	echo '<tr><td>'.__('Put on whitelist/blacklist for need Login', 'wp-mpdf').'</td><td><input ';
 	if($datas->login == true) {
 		echo 'checked="checked" ';
 	}
 	echo 'type="checkbox" name="wp_mpdf_needlogin" /></td></tr>';
 	
-	echo '<tr><td>Set a special PDF output name:</td><td><input type="text" name="wp_mpdf_pdfname" value="';
+	echo '<tr><td>'.__('Set a special PDF output name', 'wp-mpdf').':</td><td><input type="text" name="wp_mpdf_pdfname" value="';
 	echo $datas->pdfname;
-	echo '" /> (without .pdf at the end)</td></tr>';
+	echo '" /> ('.__('without .pdf at the end', 'wp-mpdf').')</td></tr>';
 	echo '</table>';
 }
 
@@ -500,10 +516,10 @@ function mpdf_admin_savepost($post_id) {
     	return $post_id;
   	}
 	
-	if('page' == $_POST['post_type']) {
+	if(isset($_POST['post_type']) && 'page' == $_POST['post_type']) {
     	if(!current_user_can('edit_page', $post_id))
      		return $post_id;
-  	} else if($_POST['post_type'] == 'post') {
+  	} else if(isset($_POST['post_type']) && $_POST['post_type'] == 'post') {
     	if(!current_user_can('edit_post', $post_id))
       		return $post_id;
   	}
@@ -560,11 +576,11 @@ function mpdf_admin_deletepost($post_id) {
    	
 	//Clear the cache from a post
 	$pdf_filename = $post->post_name . '.pdf';
-	if(file_exists(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_filename.'.cache')) {
-		unlink(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_filename.'.cache');
+	if(file_exists(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_filename.'.cache')) {
+		unlink(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_filename.'.cache');
 	}
-	if(file_exists(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_filename)) {
-		unlink(dirname(__FILE__).'/cache/'.get_option('mpdf_theme').'_'.$pdf_filename);
+	if(file_exists(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_filename)) {
+		unlink(mpdf_getcachedir().get_option('mpdf_theme').'_'.$pdf_filename);
 	}
 }
 
